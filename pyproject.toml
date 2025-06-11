@@ -6,4 +6,5 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "ichatbio-sdk>=0.1.6",
+    "pydantic>=2.11.5",
 ]
