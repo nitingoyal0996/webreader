@@ -6,7 +6,7 @@ import tiktoken
 from dotenv import load_dotenv
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from .embeddings.openai_embeddings import OpenAIEmbeddingService
+from .embeddings.openai_embeddings import OpenAIEmbeddings
 from .parser import WebContentParser
 
 load_dotenv()
@@ -17,7 +17,7 @@ class WebPageRAG:
 
     def __init__(self, dimension: int = 3072):
         self.parser = WebContentParser()
-        self.embedding_service = OpenAIEmbeddingService()
+        self.embedding_service = OpenAIEmbeddings()
         self.dimension = dimension
         self.index = faiss.IndexFlatIP(self.dimension)
         self.documents: List[Dict[str, Any]] = []
