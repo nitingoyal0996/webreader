@@ -1,5 +1,5 @@
 import re
-from typing import Dict, List
+from typing import Any, Dict, List
 
 import aiohttp
 import trafilatura
@@ -23,7 +23,7 @@ class WebContentParser:
         self.config.set("DEFAULT", "MIN_EXTRACTED_SIZE", "200")
         self.config.set("DEFAULT", "MIN_OUTPUT_SIZE", "100")
 
-    async def fetch_and_parse(self, url: str) -> Dict[str, any]:
+    async def fetch_and_parse(self, url: str) -> Dict[str, Any]:
         try:
             async with aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=self.timeout)
@@ -41,7 +41,7 @@ class WebContentParser:
         except Exception as e:
             raise Exception(f"Error fetching content: {str(e)}")
 
-    def _parse_html_content(self, html_content: str, url: str) -> Dict[str, any]:
+    def _parse_html_content(self, html_content: str, url: str) -> Dict[str, Any]:
         extracted_markdown = trafilatura.extract(
             html_content,
             config=self.config,
@@ -79,6 +79,10 @@ class WebContentParser:
         }
 
     def _clean_markdown(self, markdown: str) -> str:
+        """
+        Cleans and normalizes a Markdown string by removing excessive blank lines,
+        trimming whitespace, and eliminating certain Markdown artifacts.
+        """
         if not markdown:
             return ""
 
