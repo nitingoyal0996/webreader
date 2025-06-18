@@ -6,7 +6,7 @@ import tiktoken
 from dotenv import load_dotenv
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from .embeddings.openai_embeddings import OpenAIEmbeddings
+from .openai_embeddings import OpenAIEmbeddings
 from .parser import WebContentParser
 
 load_dotenv()
