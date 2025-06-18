@@ -12,7 +12,7 @@ from .parser import WebContentParser
 load_dotenv()
 
 
-class WebPageRAG:
+class WebPageSearch:
     """Unified RAG pipeline for single web page processing with citations."""
 
     def __init__(self, dimension: int = 3072):

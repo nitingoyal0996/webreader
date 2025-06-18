@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from typing_extensions import override
 
 from .models.request import WebReaderRequest
-from .rag import WebPageRAG
+from .search import WebPageSearch
 
 
 web_reader_agent_card = AgentCard(
@@ -34,7 +34,7 @@ web_reader_agent_card = AgentCard(
 class WebReaderAgent(IChatBioAgent):
     def __init__(self):
         self.agent_card = web_reader_agent_card
-        self.rag = WebPageRAG()
+        self.rag = WebPageSearch()
         self.openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
