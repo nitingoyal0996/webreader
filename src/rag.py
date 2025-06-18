@@ -52,7 +52,7 @@ class WebPageRAG:
         }
 
 
-    async def search_with_citations(
+    async def search(
         self, query: str, k: int = 5, score_threshold: float = 0.6
     ) -> List[Dict[str, Any]]:
         """Search and return results with formatted citations."""
