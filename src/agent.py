@@ -14,16 +14,15 @@ from .citations import CitationProcessor
 from .models.request import WebReaderRequest
 from .search import WebPageSearch
 
-
 # Number of search results to retrieve
-K = 5
+K = 10
 # Minimum cosine similarity threshold
 COSINE_THRESHOLD = 0.3
 
 
 web_reader_agent_card = AgentCard(
     name="Web Reader Agent",
-    description="""Agent that extract, reads and analyzes web content and returns related content 
+    description="""Agent that extracts, reads and analyzes web content and returns related content 
     right from the source based on a user query.
     Please provide a search query and target URL.
     """,
@@ -31,7 +30,7 @@ web_reader_agent_card = AgentCard(
     entrypoints=[
         AgentEntrypoint(
             id="read_web",
-            description="Parse and analyzes web content to search related content. Provide search query and target URL.",
+            description="Parse and analyze web content to search related content. Provide search query and target URL.",
             parameters=WebReaderRequest,
         ),
     ],
@@ -59,17 +58,17 @@ class WebReaderAgent(IChatBioAgent):
                     text="Invalid parameters for read_web. Expected WebReaderRequest."
                 )
                 return
-            async for message in self.read_and_analyze(params):
+            async for message in self.read_and_analyze(request, params):
                 yield message
         else:
             yield TextMessage(text=f"Unknown entrypoint: {entrypoint}")
 
     async def read_and_analyze(
-        self, params: WebReaderRequest
+        self, query: str, params: WebReaderRequest
     ) -> AsyncGenerator[Message, None]:
         yield ProcessMessage(
             summary="Starting web content analysis",
-            description=f"Processing URL '{params.url}' with query '{params.query}'",
+            description=f"Processing URL '{params.url}' with query '{query}'",
         )
 
         try:
@@ -77,11 +76,11 @@ class WebReaderAgent(IChatBioAgent):
 
             yield ProcessMessage(
                 summary="Content processed and indexed, performing semantic search",
-                description=f"Successfully processed '{result['title']}' - Created {result['chunks_created']} chunks. Searching for content relevant to query '{params.query}'",
+                description=f"Successfully processed '{result['title']}' - Created {result['chunks_created']} chunks. Searching for content relevant to query '{query}'",
             )
 
             search_results = await self.rag.search(
-                query=params.query, k=K, score_threshold=COSINE_THRESHOLD
+                query=query, k=K, score_threshold=COSINE_THRESHOLD
             )
 
             yield ProcessMessage(
@@ -90,11 +89,13 @@ class WebReaderAgent(IChatBioAgent):
             )
 
             raw_answer = await self._generate_ai_response(
-                params.query, search_results, result["title"], str(params.url)
+                query, search_results, result["title"], str(params.url)
             )
 
-            clean_answer, markdown_answer, citations = self.citation_processor.process_citations(
-                raw_answer, search_results, str(params.url)
+            clean_answer, markdown_answer, citations = (
+                self.citation_processor.process_citations(
+                    raw_answer, search_results, str(params.url)
+                )
             )
 
             yield TextMessage(text=markdown_answer)
@@ -127,7 +128,6 @@ class WebReaderAgent(IChatBioAgent):
             import traceback
 
             yield TextMessage(text=f"Traceback: {traceback.format_exc()}")
-
 
     async def _generate_ai_response(
         self, query: str, search_results: list, page_title: str, page_url: str
