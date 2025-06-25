@@ -2,36 +2,29 @@ from typing import Any, Dict, List
 
 import faiss
 import numpy as np
-import tiktoken
 from dotenv import load_dotenv
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from .embeddings import OpenAIEmbeddings
 from .parser import WebContentParser
+
+import nltk
+from nltk.tokenize import sent_tokenize
 
 load_dotenv()
 
 
 class WebPageSearch:
     """Unified RAG pipeline for single web page processing with citations."""
-
     def __init__(self, dimension: int = 3072):
         self.parser = WebContentParser()
         self.embedding_service = OpenAIEmbeddings()
         self.dimension = dimension
         self.index = faiss.IndexFlatIP(self.dimension)
         self.documents: List[Dict[str, Any]] = []
-
-        # Chunking setup
-        self.tokenizer = tiktoken.get_encoding("cl100k_base")
-        self.chunker = RecursiveCharacterTextSplitter(
-            chunk_size=500,
-            chunk_overlap=50,  # Reduced from 200 to 50 tokens
-            separators=["\n## ", "\n### ", "\n", "\n\n", ". "],
-            length_function=self._count_tokens,
-            is_separator_regex=False,
-        )
-
+        try:
+            nltk.data.find('tokenizers/punkt')
+        except LookupError:
+            nltk.download('punkt')
 
     async def process_url(self, url: str) -> Dict[str, Any]:
         """Fetch, parse, chunk, embed, and index a web page."""
@@ -53,7 +46,7 @@ class WebPageSearch:
 
 
     async def search(
-        self, query: str, k: int = 5, score_threshold: float = 0.6
+        self, query: str, k: int = 10, score_threshold: float = 0.4
     ) -> List[Dict[str, Any]]:
         """Search and return results with formatted citations."""
         if self.index.ntotal == 0:
@@ -61,7 +54,8 @@ class WebPageSearch:
         query_emb = await self.embedding_service.embed_texts([query])
         q = np.array([query_emb[0]], dtype=np.float32)
         faiss.normalize_L2(q)
-        distances, indices = self.index.search(q, min(k, self.index.ntotal))    # type: ignore
+        distances, indices = self.index.search(q, min(k, self.index.ntotal))
+        
         results = []
         for i, (score, idx) in enumerate(zip(distances[0], indices[0])):
             if 0 <= idx < len(self.documents) and score >= score_threshold:
@@ -73,40 +67,48 @@ class WebPageSearch:
                     }
                 )
                 results.append(doc)
+            else:
+                print(f"Rejected: idx valid: {0 <= idx < len(self.documents)}, score above threshold: {score >= score_threshold}")
         return results
 
 
     def _create_chunks(
         self, content: str, metadata: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
-        """Create chunks with metadata and original position tracking."""
-        text_chunks = self.chunker.split_text(content)
-        # Add debug output to see token vs character counts
-        chunks_with_positions = []
-        current_position = 0
-        for i, chunk in enumerate(text_chunks):
-            if chunk.strip():
-                # Find the exact position of this chunk in the original content
-                chunk_start = content.find(chunk.strip(), current_position)
-                if chunk_start == -1:
-                    # Fallback: try to find it from the beginning
-                    chunk_start = content.find(chunk.strip())
-                chunk_end = chunk_start + len(chunk.strip()) if chunk_start != -1 else current_position
+        """Create sentence-based chunks with metadata and position tracking."""
+        sentences = sent_tokenize(content)
+        chunks = []
+        SENTENCES_PER_CHUNK = 3
+        OVERLAP = 1
+        
+        for i in range(0, len(sentences), SENTENCES_PER_CHUNK - OVERLAP):
+            chunk_sentences = sentences[i:i + SENTENCES_PER_CHUNK]
+            if not chunk_sentences:
+                continue
                 
-                chunks_with_positions.append({
-                    "chunk_id": i,
-                    "text": chunk.strip(),
-                    "title": metadata.get("title", "Untitled"),
-                    "author": metadata.get("author"),
-                    "publication_date": metadata.get("publication_date"),
-                    "token_count": self._count_tokens(chunk),
-                    "position": {
-                        "start": chunk_start,
-                        "end": chunk_end,
-                    }
-                })
-                current_position = chunk_end
-        return chunks_with_positions
+            chunk_text = " ".join(chunk_sentences)
+            if not chunk_text.strip():
+                continue
+            
+            chunk_start = content.find(chunk_sentences[0])
+            chunk_end = content.find(chunk_sentences[-1]) + len(chunk_sentences[-1])
+            sentence_map = {}
+            for j, sentence in enumerate(chunk_sentences):
+                sentence_map[j + 1] = sentence
+
+            chunk_data = {
+                "text": chunk_text,
+                "chunk_id": len(chunks),
+                "sentence_count": len(chunk_sentences),
+                "sentence_map": sentence_map,
+                "metadata": {
+                    **metadata,
+                    "chunk_index": len(chunks),
+                    "total_sentences": len(chunk_sentences)
+                }
+            }
+            chunks.append(chunk_data)
+        return chunks
 
 
     def _add_to_index(self, documents: List[Dict[str, Any]]) -> None:
@@ -115,14 +117,11 @@ class WebPageSearch:
         embeddings = [np.array(doc["embedding"], dtype=np.float32) for doc in documents]
         arr = np.vstack(embeddings)
         faiss.normalize_L2(arr)
-        self.index.add(arr)     # type: ignore
+        self.index.add(arr)
+        
         for doc in documents:
             doc_copy = doc.copy()
             del doc_copy["embedding"]
             doc_copy["doc_id"] = len(self.documents)
             self.documents.append(doc_copy)
-
-
-    def _count_tokens(self, text: str) -> int:
-        return len(self.tokenizer.encode(text))
 
