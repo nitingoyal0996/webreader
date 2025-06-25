@@ -17,6 +17,8 @@ class CitationProcessor:
     def extract_citations(self, text: str) -> Tuple[str, List[Dict]]:
         """
         Extract citations from LLM response text and return cleaned text + citation data.
+
+
         Returns:
             Tuple(clean_text_without_citations, list_of_citation_dicts)
         """
@@ -127,9 +129,6 @@ class CitationProcessor:
 
     @staticmethod
     def get_citation_prompt() -> str:
-        """
-        System prompt string for citation generation.
-        """
         return """You answer using ONLY the evidence chunks provided.
 When you reference content from a chunk, wrap it like:
 <CIT chunk_id="{cid}" sentences="{srange}">exact quoted text</CIT>
