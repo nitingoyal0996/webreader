@@ -90,8 +90,6 @@ class WebPageSearch:
             if not chunk_text.strip():
                 continue
 
-            chunk_start = content.find(chunk_sentences[0])
-            chunk_end = content.find(chunk_sentences[-1]) + len(chunk_sentences[-1])
             sentence_map = {}
             for j, sentence in enumerate(chunk_sentences):
                 sentence_map[j + 1] = sentence
