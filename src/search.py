@@ -1,20 +1,20 @@
 from typing import Any, Dict, List
 
 import faiss
+import nltk
 import numpy as np
 from dotenv import load_dotenv
+from nltk.tokenize import sent_tokenize
 
 from .embeddings import OpenAIEmbeddings
 from .parser import WebContentParser
-
-import nltk
-from nltk.tokenize import sent_tokenize
 
 load_dotenv()
 
 
 class WebPageSearch:
     """Unified RAG pipeline for single web page processing with citations."""
+
     def __init__(self, dimension: int = 3072):
         self.parser = WebContentParser()
         self.embedding_service = OpenAIEmbeddings()
@@ -22,9 +22,9 @@ class WebPageSearch:
         self.index = faiss.IndexFlatIP(self.dimension)
         self.documents: List[Dict[str, Any]] = []
         try:
-            nltk.data.find('tokenizers/punkt')
+            nltk.data.find("tokenizers/punkt")
         except LookupError:
-            nltk.download('punkt')
+            nltk.download("punkt")
 
     async def process_url(self, url: str) -> Dict[str, Any]:
         """Fetch, parse, chunk, embed, and index a web page."""
@@ -44,7 +44,6 @@ class WebPageSearch:
             "ready_for_search": True,
         }
 
-
     async def search(
         self, query: str, k: int = 10, score_threshold: float = 0.4
     ) -> List[Dict[str, Any]]:
@@ -55,7 +54,7 @@ class WebPageSearch:
         q = np.array([query_emb[0]], dtype=np.float32)
         faiss.normalize_L2(q)
         distances, indices = self.index.search(q, min(k, self.index.ntotal))
-        
+
         results = []
         for i, (score, idx) in enumerate(zip(distances[0], indices[0])):
             if 0 <= idx < len(self.documents) and score >= score_threshold:
@@ -68,9 +67,10 @@ class WebPageSearch:
                 )
                 results.append(doc)
             else:
-                print(f"Rejected: idx valid: {0 <= idx < len(self.documents)}, score above threshold: {score >= score_threshold}")
+                print(
+                    f"Rejected: idx valid: {0 <= idx < len(self.documents)}, score above threshold: {score >= score_threshold}"
+                )
         return results
-
 
     def _create_chunks(
         self, content: str, metadata: Dict[str, Any]
@@ -80,16 +80,16 @@ class WebPageSearch:
         chunks = []
         SENTENCES_PER_CHUNK = 3
         OVERLAP = 1
-        
+
         for i in range(0, len(sentences), SENTENCES_PER_CHUNK - OVERLAP):
-            chunk_sentences = sentences[i:i + SENTENCES_PER_CHUNK]
+            chunk_sentences = sentences[i : i + SENTENCES_PER_CHUNK]
             if not chunk_sentences:
                 continue
-                
+
             chunk_text = " ".join(chunk_sentences)
             if not chunk_text.strip():
                 continue
-            
+
             chunk_start = content.find(chunk_sentences[0])
             chunk_end = content.find(chunk_sentences[-1]) + len(chunk_sentences[-1])
             sentence_map = {}
@@ -104,12 +104,11 @@ class WebPageSearch:
                 "metadata": {
                     **metadata,
                     "chunk_index": len(chunks),
-                    "total_sentences": len(chunk_sentences)
-                }
+                    "total_sentences": len(chunk_sentences),
+                },
             }
             chunks.append(chunk_data)
         return chunks
-
 
     def _add_to_index(self, documents: List[Dict[str, Any]]) -> None:
         if not documents:
@@ -118,10 +117,9 @@ class WebPageSearch:
         arr = np.vstack(embeddings)
         faiss.normalize_L2(arr)
         self.index.add(arr)
-        
+
         for doc in documents:
             doc_copy = doc.copy()
             del doc_copy["embedding"]
             doc_copy["doc_id"] = len(self.documents)
             self.documents.append(doc_copy)
-
