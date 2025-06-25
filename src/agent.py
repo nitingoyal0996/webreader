@@ -10,8 +10,15 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel
 from typing_extensions import override
 
+from .citations import CitationProcessor
 from .models.request import WebReaderRequest
 from .search import WebPageSearch
+
+
+# Number of search results to retrieve
+K = 5
+# Minimum cosine similarity threshold
+COSINE_THRESHOLD = 0.3
 
 
 web_reader_agent_card = AgentCard(
@@ -36,17 +43,16 @@ class WebReaderAgent(IChatBioAgent):
         self.agent_card = web_reader_agent_card
         self.rag = WebPageSearch()
         self.openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
+        self.citation_processor = CitationProcessor()
 
     @override
     def get_agent_card(self) -> AgentCard:
         return self.agent_card
 
-
     @override
-    async def run(                                                                      # type: ignore
+    async def run(  # type: ignore
         self, request: str, entrypoint: str, params: Optional[BaseModel]
-    ) -> AsyncGenerator[Message, None]: 
+    ) -> AsyncGenerator[Message, None]:
         if entrypoint == "read_web":
             if not isinstance(params, WebReaderRequest):
                 yield TextMessage(
@@ -58,7 +64,6 @@ class WebReaderAgent(IChatBioAgent):
         else:
             yield TextMessage(text=f"Unknown entrypoint: {entrypoint}")
 
-
     async def read_and_analyze(
         self, params: WebReaderRequest
     ) -> AsyncGenerator[Message, None]:
@@ -66,56 +71,45 @@ class WebReaderAgent(IChatBioAgent):
             summary="Starting web content analysis",
             description=f"Processing URL '{params.url}' with query '{params.query}'",
         )
-        K = 5  # Get more results for better analysis
-        COSINE_THRESHOLD = 0.6    # Lower threshold to catch more relevant content
 
         try:
-            # Use RAG to process the URL
             result = await self.rag.process_url(str(params.url))
 
             yield ProcessMessage(
-                summary="Content processed and indexed",
-                description=f"Successfully processed '{result['title']}' - Created {result['chunks_created']} chunks",
-            )
-
-            yield ProcessMessage(
-                summary="Performing semantic search",
-                description=f"Searching for content relevant to query '{params.query}'",
+                summary="Content processed and indexed, performing semantic search",
+                description=f"Successfully processed '{result['title']}' - Created {result['chunks_created']} chunks. Searching for content relevant to query '{params.query}'",
             )
 
             search_results = await self.rag.search(
-                query=params.query, 
-                k=K,
-                score_threshold=COSINE_THRESHOLD
+                query=params.query, k=K, score_threshold=COSINE_THRESHOLD
             )
 
             yield ProcessMessage(
-                summary="Search completed",
-                description=f"Found {len(search_results)} semantically relevant sections with over {COSINE_THRESHOLD} cosine similarity",
+                summary="Search completed, compiling response",
+                description=f"Found {len(search_results)} semantically relevant sections. Analyzing search results to provide comprehensive answer.",
             )
 
-            # Generate AI response based on search results
-            yield ProcessMessage(
-                summary="Generating AI response",
-                description="Analyzing search results to provide comprehensive answer",
+            raw_answer = await self._generate_ai_response(
+                params.query, search_results, result["title"], str(params.url)
             )
 
-            ai_response = await self._generate_ai_response(params.query, search_results, result["title"])
+            clean_answer, markdown_answer, citations = self.citation_processor.process_citations(
+                raw_answer, search_results, str(params.url)
+            )
 
-            yield TextMessage(text=ai_response)
-
-            results = {
-                "url": str(params.url),
-                "query": params.query,
-                "title": result["title"],
-                "total_chunks": result["chunks_created"],
-                "relevant_page_content": search_results,
-            }
+            yield TextMessage(text=markdown_answer)
 
             yield ArtifactMessage(
                 mimetype="application/json",
-                description=f"Semantic search results for '{params.query}'",
-                content=json.dumps(results, indent=2).encode("utf-8"),
+                description="Answer with inline citations and hyperlinks",
+                content=json.dumps(
+                    {
+                        "answer": clean_answer,
+                        "citations": citations,
+                        "markdown_answer": markdown_answer,
+                    },
+                    indent=2,
+                ).encode("utf-8"),
                 uris=[str(params.url)],
                 metadata={
                     "total_matches": len(search_results),
@@ -124,61 +118,55 @@ class WebReaderAgent(IChatBioAgent):
             )
 
             yield ProcessMessage(
-                summary="Web content analysis completed",
-                description=f"Completed analysis with {len(search_results)} relevant matches with precise citations",
+                summary="Analysis completed",
+                description=f"Generated response with {len(citations)} citations",
             )
 
         except Exception as e:
             yield TextMessage(text=f"Error analyzing web content: {str(e)}")
             import traceback
+
             yield TextMessage(text=f"Traceback: {traceback.format_exc()}")
 
 
-    async def _generate_ai_response(self, query: str, search_results: list, page_title: str) -> str:
-        """Generate a comprehensive AI response based on search results."""
+    async def _generate_ai_response(
+        self, query: str, search_results: list, page_title: str, page_url: str
+    ) -> str:
+        """Generate a LLM response based on search results."""
         if not search_results:
             return f"I couldn't find any relevant content about '{query}' in the webpage '{page_title}'. The content may not cover this topic or you might want to try a different search query."
 
         # Prepare context from similarity search results
         context_parts = []
-        for i, result in enumerate(search_results[:5], 1):  # Use top 5 most relevant results
-            text = result["text"]
-            score = result["cosine_similarity"]
-            position = result["position"]
-            context_parts.append(f"[Source {i}] (Score: {score:.3f}, Position: {position['start']}-{position['end']})\n{text}\n")
-        context = "\n".join(context_parts)
-        prompt = f"""You are a helpful assistant that answers questions based on web content. 
-User Question: {query}
-Web Page Title: {page_title}
-Relevant Content (with similarity scores and positions):
-{context}
-Important Rules:
-- Answer the user's question based ONLY on the provided relevant content
-- Do not make assumptions or provide information not found in the content
-- If the content does not answer the question, clearly state that
-- Use the provided content to generate a clear, concise, and accurate response
-- If the content is insufficient, acknowledge that and suggest the user try a different query
-- Keep your response natural and conversational
-- If there are multiple perspectives or details, include them
-Answer:"""
+        for hit in search_results[:5]:
+            sentence_info = ""
+            if "sentence_map" in hit:
+                sentence_count = len(hit["sentence_map"])
+                sentence_info = f" (contains {sentence_count} sentences)"
+            context_parts.append(f"[{hit['chunk_id']}]{sentence_info} {hit['text']}")
+
+        system_prompt = self.citation_processor.get_citation_prompt()
+
+        user_prompt = (
+            f"User Question: {query}\n"
+            f"Web Page Title: {page_title}\n"
+            f"Relevant Content:\n"
+            f"{"\n".join(context_parts)}\n"
+            "Answer:"
+        )
+
         try:
             response = await self.openai_client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
-                    {
-                        "role": "system", 
-                        "content": "You are a helpful assistant that provides clear, accurate answers based on web content."
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
                 ],
-                max_tokens=1000,
-                temperature=0.7
+                max_tokens=1500,
+                temperature=0.2,  # lower temp for less creativity.
             )
-            
-            return response.choices[0].message.content or "I couldn't generate a response."
-            
+            return (
+                response.choices[0].message.content or "I couldn't generate a response."
+            )
         except Exception as e:
             return f"Error generating AI response: {str(e)}"
