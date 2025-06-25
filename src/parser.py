@@ -102,6 +102,9 @@ class WebContentParser:
             prev_line_empty = False
 
         cleaned = "\n".join(lines)
+        cleaned = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', cleaned)
+        cleaned = re.sub(r'\[([^\]]+)\]', r'\1', cleaned)
+        cleaned = re.sub(r'\[\s*\]\(\s*\)', '', cleaned)
         cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
         cleaned = re.sub(r"\*\s+\*", "", cleaned)
         cleaned = re.sub(r"_\s+_", "", cleaned)
