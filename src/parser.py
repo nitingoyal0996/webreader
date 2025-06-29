@@ -80,8 +80,9 @@ class WebContentParser:
 
     def _clean_markdown(self, markdown: str) -> str:
         """
-        Cleans and normalizes a Markdown string by removing excessive blank lines,
-        trimming whitespace, and eliminating certain Markdown artifacts.
+        Cleans and normalizes a Markdown string by removing embedded links, 
+        excessive blank lines, rimming whitespace, and eliminating certain 
+        Markdown artifacts for better citations generation.
         """
         if not markdown:
             return ""
@@ -110,5 +111,7 @@ class WebContentParser:
         cleaned = re.sub(r"_\s+_", "", cleaned)
         cleaned = re.sub(r"\[\s*\]\(\s*\)", "", cleaned)
         cleaned = re.sub(r"^(#{1,6})\s*$", "", cleaned, flags=re.MULTILINE)
+        cleaned = re.sub(r'(?<!\n)\n(?!\n)', ' ', cleaned)
+        cleaned = re.sub(r'\s+', ' ', cleaned)
 
         return cleaned.strip()

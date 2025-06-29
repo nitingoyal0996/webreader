@@ -32,6 +32,8 @@ class CitationProcessor:
                     "snippet": match.group("src").strip(),
                 }
             )
+            if clean_parts and not clean_parts[-1].endswith(" "):
+                clean_parts.append(" ")
             # Add the citation content to clean text (without the tags)
             clean_parts.append(match.group("src").strip())
             last_pos = match.end()
@@ -57,12 +59,11 @@ class CitationProcessor:
                 citation_text = citation.get("snippet", "").strip()
                 if not citation_text:
                     continue
-                # Clean the citation text but preserve all content
-                clean_text = " ".join(citation_text.split())
-                # Use partial content for URL text-fragment
-                fragment_text = self._prepare_fragment_text(clean_text)
-                encoded_fragment = quote(fragment_text, safe="")
-                link = f"{page_url}#:~:text={encoded_fragment}"
+                start_text, end_text = self._prepare_fragment_text(citation_text)
+                encoded_start = quote(start_text, safe="")
+                encoded_end = quote(end_text, safe="")
+                link = f"{page_url}#:~:text={encoded_start},{encoded_end}"
+                fragment_text = f"{start_text}...{end_text}"
                 resolved.append(
                     {
                         **citation,
@@ -71,7 +72,8 @@ class CitationProcessor:
                         "fragment_text": fragment_text,
                     }
                 )
-            except Exception:
+            except Exception as e:
+                print(f"Error creating citation link: {e}")
                 continue
         return resolved
 
@@ -118,22 +120,24 @@ class CitationProcessor:
         markdown_text = self.convert_to_markdown_links(ai_response, resolved_citations)
         return clean_text, markdown_text, resolved_citations
 
-    def _prepare_fragment_text(self, text: str, max_length: int = 120) -> str:
-        if len(text) <= max_length:
-            return text
-        fragment_text = text[:max_length]
-        last_space = fragment_text.rfind(" ")
-        if last_space > max_length * 0.6:
-            fragment_text = fragment_text[:last_space]
-        return fragment_text
+    def _prepare_fragment_text(self, text: str) -> tuple[str, str]:
+        text = " ".join(text.split())
+        sentences = text.split(". ")
+        start_text = " ".join(sentences[0].split()[:2])
+        end_text = " ".join(sentences[-1].split()[-2:])
+        return start_text, end_text
 
     @staticmethod
-    def get_citation_prompt() -> str:
-        return """You answer using ONLY the evidence chunks provided.
+    def get_citation_prompt():
+        return """
+You answer using ONLY the evidence chunks provided.
 When you reference content from a chunk, wrap it like:
 <CIT chunk_id="{cid}" sentences="{srange}">exact quoted text</CIT>
 
 CRITICAL RULES:
+- Each <CIT> tag must wrap only contiguous sentences from a single chunk, and the text inside must match exactly the corresponding sentences from the chunk's sentence_map.
+- Do NOT combine sentences from different parts of the chunk or from different chunks in a single <CIT> tag.
+- If you need to cite multiple sentences from different places, use multiple <CIT> tags.
 - chunk_id must exactly match the number in brackets [chunk_id] from the provided chunks
 - sentences should be "1" for first sentence, "1-2" for first two sentences, etc.
 - DO NOT repeat text outside and inside citation tags
