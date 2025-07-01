@@ -7,6 +7,7 @@ The system uses advanced RAG (Retrieval-Augmented Generation) techniques to unde
 ## 🏗️ Architecture Overview
 
 ```mermaid
+%%{init: {'theme':'base', 'themeVariables': {'primaryColor': '#ffffff', 'primaryTextColor': '#000000', 'primaryBorderColor': '#000000', 'lineColor': '#000000', 'secondaryColor': '#ffffff', 'tertiaryColor': '#ffffff', 'background': '#ffffff', 'mainBkg': '#ffffff', 'secondBkg': '#ffffff', 'tertiaryBkg': '#ffffff'}}}%%
 graph TD
     subgraph "WebReader Search & Response System"
         %% Input
