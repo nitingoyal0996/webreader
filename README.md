@@ -1,8 +1,24 @@
 # WebReader 🌐
 
-WebReader is an intelligent web content analysis system that lets you ask questions about any webpage and get accurate, citation-backed answers. Instead of manually reading through long articles, simply provide a URL and your question - WebReader will extract the relevant information and provide precise answers with source citations.
+WebReader lets you ask questions about any webpage and get accurate, citation-backed answers. Instead of manually reading through long articles, simply provide a URL and your question - WebReader will extract the relevant information and provide precise answers with source citations.
 
-The system uses advanced RAG (Retrieval-Augmented Generation) techniques to understand your query, intelligently search through the web content, and generate comprehensive responses with exact source references.
+The system uses Retrieval-Augmented Generation to understand your query, search through the web page content, and generate comprehensive responses with exact source references.
+
+## How It Works
+
+WebReader combines content extraction, semantic understanding, and querying:
+
+**Content Processing**: The system fetches web pages and breaks them into searchable chunks, then converts each chunk into vector embeddings. These vectors are temporarily stored in a FAISS index for similarity search.
+
+**Query Handling**: When you ask a question, WebReader first classifies whether it's a general question (like "what is this about?") or a specific one (like "what are the side effects?"). For general questions, it enhances your query with key concepts from the content to find better matches.
+
+**Semantic Search**: Your question is converted to a vector too and matched against the content chunks using cosine similarity. The system finds the most relevant sections and generates an answer with precise citations pointing to the exact source sentences.
+
+## Technical Details
+
+The architecture diagram above shows the complete flow using color coding: blue for web operations, orange for LLM processing, purple for vector operations, green for query processing, and light green for output handling.
+
+WebReader is built with [Python](https://www.python.org/) and uses [Trafilatura](https://trafilatura.readthedocs.io/en/latest/) for clean web content extraction, [OpenAI's API](https://platform.openai.com/docs/) for embeddings and text generation, and [FAISS](https://faiss.ai/) for vector similarity search. The system supports both text responses and structured JSON output with clickable citation links.
 
 ## 🏗️ Architecture Overview
 
@@ -58,21 +74,3 @@ graph TD
     class E2,F1,F2,F3,F4 outputOps
     class EXT1,EXT2,EXT3,EXT4,EXT5,EXT6,EXT7,EXT8 external
 ```
-
-## How It Works
-
-WebReader processes web content through a sophisticated pipeline that combines content extraction, semantic understanding, and intelligent querying:
-
-**Content Processing**: The system fetches web pages and breaks them into searchable chunks, then converts each chunk into high-dimensional vectors using OpenAI's embedding models. These vectors are stored in a FAISS index for fast similarity search.
-
-**Smart Query Handling**: When you ask a question, WebReader first classifies whether it's a general question (like "what is this about?") or a specific one (like "what are the side effects?"). For general questions, it enhances your query with key concepts from the content to find better matches.
-
-**Semantic Search**: Your question is converted to a vector and matched against the content chunks using cosine similarity. The system finds the most relevant sections and generates a comprehensive answer with precise citations pointing to the exact source sentences.
-
-## Technical Details
-
-The architecture diagram above shows the complete flow using color coding: blue for web operations, orange for AI processing, purple for vector operations, green for query intelligence, and light green for output generation.
-
-WebReader is built with Python and uses OpenAI's API for embeddings and text generation, FAISS for vector similarity search, and Trafilatura for clean web content extraction. The system supports both text responses and structured JSON output with clickable citation links.
-
-The key innovation is the adaptive query processing - the system automatically determines the best search strategy based on your question type, ensuring you get relevant results whether you're asking for a summary or specific technical details.
