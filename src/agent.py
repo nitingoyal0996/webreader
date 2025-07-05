@@ -1,11 +1,10 @@
 import json
 import os
-from collections.abc import AsyncGenerator
 from typing import Optional
 
 from ichatbio.agent import IChatBioAgent
-from ichatbio.types import (AgentCard, AgentEntrypoint, ArtifactMessage,
-                            Message, ProcessMessage, TextMessage)
+from ichatbio.agent_response import IChatBioAgentProcess, ResponseContext
+from ichatbio.types import AgentCard, AgentEntrypoint
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 from typing_extensions import override
@@ -49,85 +48,105 @@ class WebReaderAgent(IChatBioAgent):
         return self.agent_card
 
     @override
-    async def run(  # type: ignore
-        self, request: str, entrypoint: str, params: Optional[BaseModel]
-    ) -> AsyncGenerator[Message, None]:
-        if entrypoint == "read_web":
-            if not isinstance(params, WebReaderRequest):
-                yield TextMessage(
-                    text="Invalid parameters for read_web. Expected WebReaderRequest."
-                )
-                return
-            async for message in self.read_and_analyze(request, params):
-                yield message
-        else:
-            yield TextMessage(text=f"Unknown entrypoint: {entrypoint}")
+    async def run(
+        self,
+        context: ResponseContext,
+        request: str,
+        entrypoint: str,
+        params: Optional[BaseModel],
+    ):
+        if entrypoint != "read_web":
+            await context.reply(f"Unknown entrypoint: {entrypoint}")
+            return
+
+        if not isinstance(params, WebReaderRequest):
+            await context.reply(
+                "Invalid parameters for read_web. Expected WebReaderRequest."
+            )
+            return
+
+        await self.read_and_analyze(context, request, params)
 
     async def read_and_analyze(
-        self, query: str, params: WebReaderRequest
-    ) -> AsyncGenerator[Message, None]:
-        yield ProcessMessage(
-            summary="Starting web content analysis",
-            description=f"Processing URL '{params.url}' with query '{query}'",
-        )
+        self, context: ResponseContext, query: str, params: WebReaderRequest
+    ):
+        async with context.begin_process(summary="Web content analysis") as process:
+            process: IChatBioAgentProcess
 
-        try:
-            result = await self.rag.process_url(str(params.url))
-
-            yield ProcessMessage(
-                summary="Content processed and indexed, performing semantic search",
-                description=f"Successfully processed '{result['title']}' - Created {result['chunks_created']} chunks. Searching for content relevant to query '{query}'",
+            await process.log(
+                f"Starting web content analysis for URL '{params.url}' with query '{query}'",
+                data={"url": str(params.url), "query": query},
             )
 
-            search_results = await self.rag.search(
-                query=query, k=K, score_threshold=COSINE_THRESHOLD
-            )
+            try:
+                result = await self.rag.process_url(str(params.url))
 
-            yield ProcessMessage(
-                summary="Search completed, compiling response",
-                description=f"Found {len(search_results)} semantically relevant sections. Analyzing search results to provide comprehensive answer.",
-            )
-
-            raw_answer = await self._generate_ai_response(
-                query, search_results, result["title"], str(params.url)
-            )
-
-            clean_answer, markdown_answer, citations = (
-                self.citation_processor.process_citations(
-                    raw_answer, search_results, str(params.url)
-                )
-            )
-
-            yield TextMessage(text=markdown_answer)
-
-            yield ArtifactMessage(
-                mimetype="application/json",
-                description="Answer with inline citations and hyperlinks",
-                content=json.dumps(
-                    {
-                        "answer": clean_answer,
-                        "citations": citations,
-                        "markdown_answer": markdown_answer,
+                await process.log(
+                    "Content processed and indexed, performing semantic search",
+                    data={
+                        "title": result["title"],
+                        "chunks_created": result["chunks_created"],
+                        "query": query,
                     },
-                    indent=2,
-                ).encode("utf-8"),
-                uris=[str(params.url)],
-                metadata={
-                    "total_matches": len(search_results),
-                    "cosine_score_threshold": COSINE_THRESHOLD,
-                },
-            )
+                )
 
-            yield ProcessMessage(
-                summary="Analysis completed",
-                description=f"Generated response with {len(citations)} citations",
-            )
+                search_results = await self.rag.search(
+                    query=query, k=K, score_threshold=COSINE_THRESHOLD
+                )
 
-        except Exception as e:
-            yield TextMessage(text=f"Error analyzing web content: {str(e)}")
-            import traceback
+                await process.log(
+                    "Search completed, compiling response",
+                    data={
+                        "relevant_sections_found": len(search_results),
+                        "cosine_threshold": COSINE_THRESHOLD,
+                    },
+                )
 
-            yield TextMessage(text=f"Traceback: {traceback.format_exc()}")
+                raw_answer = await self._generate_ai_response(
+                    query, search_results, result["title"], str(params.url)
+                )
+
+                clean_answer, markdown_answer, citations = (
+                    self.citation_processor.process_citations(
+                        raw_answer, search_results, str(params.url)
+                    )
+                )
+
+                await context.reply(markdown_answer)
+
+                await process.create_artifact(
+                    mimetype="application/json",
+                    description="Answer with inline citations and hyperlinks",
+                    content=json.dumps(
+                        {
+                            "answer": clean_answer,
+                            "citations": citations,
+                            "markdown_answer": markdown_answer,
+                        },
+                        indent=2,
+                    ).encode("utf-8"),
+                    uris=[str(params.url)],
+                    metadata={
+                        "total_matches": len(search_results),
+                        "cosine_score_threshold": COSINE_THRESHOLD,
+                        "page_title": result["title"],
+                        "chunks_created": result["chunks_created"],
+                    },
+                )
+
+                await process.log(
+                    f"Analysis completed with {len(citations)} citations",
+                    data={"citations_count": len(citations)},
+                )
+
+            except Exception as e:
+                await context.reply(f"Error analyzing web content: {str(e)}")
+                import traceback
+
+                await process.log(
+                    f"Error details: {traceback.format_exc()}",
+                    data={"error": str(e), "traceback": traceback.format_exc()},
+                )
 
     async def _generate_ai_response(
         self, query: str, search_results: list, page_title: str, page_url: str
